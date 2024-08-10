@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drip Alert</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-messaging.js"></script>
+</head>
+<body>
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics.js";
+        // TODO: Add SDKs for Firebase products that you want to use
+        // https://firebase.google.com/docs/web/setup#available-libraries
+      
+        // Your web app's Firebase configuration
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+          apiKey: "AIzaSyBdirNB03XH1MiltVfUnLlo1wBtI7NcNRE",
+          authDomain: "glucose-notify.firebaseapp.com",
+          projectId: "glucose-notify",
+          storageBucket: "glucose-notify.appspot.com",
+          messagingSenderId: "308984723176",
+          appId: "1:308984723176:web:4238a627947ef49dcbfb5d",
+          measurementId: "G-W25W68XDDN"
+        };
+      
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+      </script>
+    <div class="container">
+        <h1>Drip Alert</h1>
+        <!-- Form to capture patient information -->
+        <form id="notificationForm">
+            <div class="input-group">
+                <label for="bedNumber">Bed Number:</label>
+                <input type="text" id="bedNumber" name="bedNumber" placeholder="Enter Bed Number" required>
+            </div>
+            <div class="input-group">
+                <label for="patientName">Patient Name:</label>
+                <input type="text" id="patientName" name="patientName" placeholder="Enter Patient Name" required>
+            </div>
+            <button type="submit">Save</button>
+        </form>
+    </div>
+    
+    <audio id="notificationSound" src="sound.mp3" preload="auto"></audio>
+    
+    <script src="app.js"></script>
+</body>
+</html>

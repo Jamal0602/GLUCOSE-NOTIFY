@@ -1,0 +1,343 @@
+activity_main.xml:
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <EditText
+        android:id="@+id/bedNumberInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Enter Bed Number" />
+
+    <EditText
+        android:id="@+id/patientNameInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Enter Patient Name" />
+
+    <Button
+        android:id="@+id/saveButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Save" />
+</LinearLayout>
+=======================================================================================================================================================================================================
+MainActivity.kt:
+package com.example.dripalert
+
+import android.content.SharedPreferences
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import kotlinx.android.synthetic.main.activity_main.*
+
+class MainActivity : AppCompatActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // Load previously saved data
+        loadSavedData()
+
+        saveButton.setOnClickListener {
+            saveData()
+        }
+    }
+
+    private fun loadSavedData() {
+        val prefs: SharedPreferences = getSharedPreferences("DripAlertPrefs", MODE_PRIVATE)
+        val bedNumber = prefs.getString("bedNumber", "")
+        val patientName = prefs.getString("patientName", "")
+
+        bedNumberInput.setText(bedNumber)
+        patientNameInput.setText(patientName)
+    }
+
+    private fun saveData() {
+        val bedNumber = bedNumberInput.text.toString()
+        val patientName = patientNameInput.text.toString()
+
+        val editor = getSharedPreferences("DripAlertPrefs", MODE_PRIVATE).edit()
+        editor.putString("bedNumber", bedNumber)
+        editor.putString("patientName", patientName)
+        editor.apply()
+
+        // Optionally send this data to Firebase or to the Arduino
+    }
+}
+
+=======================================================================================================================================================================================================
+MyFirebaseMessagingService.kt:
+package com.example.dripalert
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import com.google.firebase.messaging.FirebaseMessagingService
+import com.google.firebase.messaging.RemoteMessage
+
+class MyFirebaseMessagingService : FirebaseMessagingService() {
+
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        super.onMessageReceived(remoteMessage)
+
+        // Show notification
+        sendNotification(remoteMessage.notification?.body)
+    }
+
+    private fun sendNotification(messageBody: String?) {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_ONE_SHOT)
+
+        val channelId = "Default"
+        val notificationBuilder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Drip Alert")
+            .setContentText(messageBody)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Since Android Oreo, notification channels are needed.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Default channel", NotificationManager.IMPORTANCE_DEFAULT)
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        notificationManager.notify(0, notificationBuilder.build())
+    }
+}
+
+=======================================================================================================================================================================================================
+Arduino Code:
+#include "HX711.h"
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+
+// HX711 circuit wiring
+const int LOADCELL_DOUT_PIN = D2;
+const int LOADCELL_SCK_PIN = D3;
+const int BUZZER_PIN = D4;
+
+HX711 scale;
+WiFiClient client;
+
+// Wi-Fi credentials
+const char* ssid = "Redmi 13 5G";
+const char* password = "123@1234";
+
+// Firebase credentials
+const char* serverKey = "BDlMg1TO3HtKDyzninX-E58RJzU9NLGuiDH5W5gGGKDHqJ9esdtqBllzpQT9TvYMf-oztPnQvTTs7rsPBnHRb3s";
+const char* firebaseUrl = "https://fcm.googleapis.com/fcm/send";
+
+// Storage for custom messages
+String bedNumber = "";
+String patientName = "";
+
+// Simple web server
+WiFiServer server(80);
+
+void setup() {
+  pinMode(BUZZER_PIN, OUTPUT);
+  Serial.begin(115200);
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  WiFi.begin(ssid, password);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+}
+
+void loop() {
+  if (scale.is_ready()) {
+    long reading = scale.read();
+    float weight = reading / 1000.0; // Assuming your scale gives raw readings that need conversion to grams.
+
+    Serial.print("Weight: ");
+    Serial.print(weight);
+    Serial.println(" grams");
+
+    if (weight < -62.15) {
+      Serial.println("Stand is Empty");
+      delay(4000);
+      
+    } else if (weight >= -61.95 && weight < -62.15) {
+      Serial.println("Emergency");
+      // Call buzzer() for 3 times
+      for (int i = 0; i < 3; i++) {
+        buzz();
+        delay(4000); // Delay 4 seconds between buzzes
+      }
+      sendFirebaseNotificationEMG();
+      
+    } else if (weight >= -62.15 && weight <= -63.50) {
+      Serial.println("Glucose is Getting Low");
+      // Call buzzer() for 1 time
+      buzz();
+      delay(4000); // Delay 4 seconds
+      sendFirebaseNotification();
+      
+    } else if (weight > -63.50) {
+      Serial.println("Glucose is Loading. Plz, Wait...");
+      // No buzzer or alert required for this range
+    }
+    
+  } else {
+    Serial.println("HX711 not found.");
+  }
+
+  delay(3000); // Check weight every 5 seconds
+}
+void parseInput(String input) {
+  if (input.startsWith("GET /bedNumber=")) {
+    int bedNumberStart = input.indexOf("=") + 1;
+    int patientNameStart = input.indexOf("&patientName=") + 13;
+    bedNumber = input.substring(bedNumberStart, patientNameStart - 13);
+    patientName = input.substring(patientNameStart, input.indexOf(" ", patientNameStart));
+
+    Serial.println("Bed Number: " + bedNumber);
+    Serial.println("Patient Name: " + patientName);
+  }
+}
+
+void sendFirebaseNotification() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(firebaseUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "key=" + String(serverKey));
+    
+    String message = "{\"to\": \"/topics/all\", \"notification\": {\"title\": \"Drip Alert\", \"body\": \"Bed: " + bedNumber + ", Patient: " + patientName + " - The drip bottle is nearly empty! Please check.\"}}";
+    
+    int httpResponseCode = http.POST(message);
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponseCode);
+      Serial.println(response);
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+}
+
+void sendFirebaseNotificationEMG() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(firebaseUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "key=" + String(serverKey));
+    
+    String message = "{\"to\": \"/topics/all\", \"notification\": {\"title\": \"Drip Alert\", \"body\": \"Bed: " + bedNumber + ", Patient: " + patientName + " - The drip bottle is empty! plz check.\"}}";
+    
+    int httpResponseCode = http.POST(message);
+    
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponseCode);
+      Serial.println(response);
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+}
+void buzz() {
+  // Activate buzzer for alert
+  digitalWrite(BUZZER_PIN, HIGH); // Buzzer ON
+  delay(1000); // Buzz for 1 second
+  digitalWrite(BUZZER_PIN, LOW); // Buzzer OFF
+}
+=======================================================================================================================================================================================================
+index.html
+
+=======================================================================================================================================================================================================
+style.css
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 500px;
+    margin: 50px auto;
+    padding: 20px;
+    background: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+}
+
+.input-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    color: #555;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+button {
+    width: 100%;
+    padding: 10px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #218838;
+}
+
+@media only screen and (max-width: 600px) {
+    .container {
+        margin: 20px;
+        padding: 10px;
+    }
+
+    h1 {
+        font-size: 1.5em;
+    }
+
+    input[type="text"],
+    button {
+        font-size: 1em;
+    }
+}
+
+=======================================================================================================================================================================================================
+script.js
+
+=======================================================================================================================================================================================================
